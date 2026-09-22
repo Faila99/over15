@@ -19,8 +19,8 @@ name: backfill
 on:
   workflow_dispatch:
   schedule:
-    # every hour on the hour, UTC. Adjust if you want a different cadence.
-    - cron: "0 * * * *"
+    # every 30 minutes, UTC. GitHub may delay by up to ~15 min under load.
+    - cron: "*/30 * * * *"
 
 # Only one backfill run at a time per repo (prevents concurrent commit conflicts).
 concurrency:
@@ -28,7 +28,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  MAX_DATES: 30          # dates per run
+  MAX_DATES: 100         # let quiet runs power through — RUN_TIMEOUT is the real cap
   RUN_TIMEOUT: 2700      # seconds (45 min hard cap inside the scraper)
   DELAY: 1.0             # base seconds between HTTP requests (jittered ±20%)
   SLICE: focus
