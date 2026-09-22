@@ -1,0 +1,83 @@
+name: backfill
+
+# Chunked backfill of primatips fixtures for focus leagues.
+# Each run processes up to MAX_DATES un-completed dates, capped at RUN_TIMEOUT
+# seconds. Cron re-runs pick up where the previous run left off (checkpoint
+# file at data/backfill/checkpoints/completed.txt).
+#
+# Per-account setup:
+#   1. Fork this repo (or push a copy) to your account.
+#   2. In Settings → Secrets and variables → Actions → Variables, set:
+#        FROM_DATE  e.g. 2022-07-01
+#        TO_DATE    e.g. 2023-04-30   (this account's date range)
+#   3. Enable Actions on the fork (may need to click "I understand my workflows").
+#   4. Trigger the first run manually (workflow_dispatch), then cron takes over.
+#
+# All 4 accounts run independently; combine outputs at the end by concatenating
+# their data/backfill/*.jsonl files.
+
+on:
+  workflow_dispatch:
+  schedule:
+    # every hour on the hour, UTC. Adjust if you want a different cadence.
+    - cron: "0 * * * *"
+
+# Only one backfill run at a time per repo (prevents concurrent commit conflicts).
+concurrency:
+  group: backfill
+  cancel-in-progress: false
+
+env:
+  MAX_DATES: 30          # dates per run
+  RUN_TIMEOUT: 2700      # seconds (45 min hard cap inside the scraper)
+  DELAY: 1.0             # base seconds between HTTP requests (jittered ±20%)
+  SLICE: focus
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    timeout-minutes: 55   # GH-level cap; scraper stops at RUN_TIMEOUT first
+    permissions:
+      contents: write     # needed to commit results back
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install --quiet requests beautifulsoup4 unidecode
+
+      - name: Show target range
+        run: |
+          echo "FROM_DATE=${{ vars.FROM_DATE }}"
+          echo "TO_DATE=${{ vars.TO_DATE }}"
+          echo "MAX_DATES=$MAX_DATES  RUN_TIMEOUT=$RUN_TIMEOUT"
+
+      - name: Run backfill chunk
+        run: |
+          python3 -m src.backfill \
+            --from-date "${{ vars.FROM_DATE }}" \
+            --to-date "${{ vars.TO_DATE }}" \
+            --slice "$SLICE" \
+            --delay "$DELAY" \
+            --max-dates "$MAX_DATES" \
+            --max-runtime "$RUN_TIMEOUT"
+
+      - name: Commit and push results
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/backfill/
+          # Only commit if something changed
+          if ! git diff --cached --quiet; then
+            git commit -m "backfill: $(ls data/backfill/*.jsonl 2>/dev/null | wc -l) day-files after run $(date -u +%FT%TZ)"
+            # Pull with rebase to avoid pushing over concurrent updates
+            git pull --rebase --autostash
+            git push
+          else
+            echo "No new fixtures this run."
+          fi

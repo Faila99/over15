@@ -1,0 +1,20 @@
+.env
+.env.local
+__pycache__/
+*.pyc
+*.pyo
+venv/
+.venv/
+
+# Raw source data (kept locally, exported from Supabase — not for the repo)
+data/raw/
+
+# Clean/derived outputs — regenerable from raw + backfill via `python -m src.clean --derive`
+data/clean/
+
+# Backfill outputs ARE committed (GH Actions writes them per-day, small files).
+# But drop the .gitignore itself for the backfill dir if it exists.
+!data/backfill/
+
+.pytest_cache/
+.ipynb_checkpoints/
